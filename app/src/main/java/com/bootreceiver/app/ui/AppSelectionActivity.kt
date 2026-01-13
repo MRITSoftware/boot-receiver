@@ -189,19 +189,26 @@ class AppSelectionActivity : AppCompatActivity() {
                 
                 val apps = installedPackages
                     .filter { 
-                        // Filtra apenas apps que podem ser abertos (não são serviços do sistema)
+                        // Filtra apenas apps que podem ser abertos
                         val appInfo = it.applicationInfo
-                        (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) == 0 || 
-                        (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+                        val launchIntent = packageManager.getLaunchIntentForPackage(it.packageName)
+                        // Inclui apps que têm intent de launch (podem ser abertos)
+                        launchIntent != null
                     }
                     .map {
                         val appInfo = it.applicationInfo
-                        val appName = packageManager.getApplicationLabel(appInfo).toString()
+                        val appName = try {
+                            packageManager.getApplicationLabel(appInfo).toString()
+                        } catch (e: Exception) {
+                            it.packageName
+                        }
                         AppInfo(appName, it.packageName)
                     }
                     .sortedBy { it.name }
+                    .distinctBy { it.packageName }
                 
                 withContext(Dispatchers.Main) {
+                    Log.d(TAG, "Carregados ${apps.size} aplicativos")
                     appsList.clear()
                     appsList.addAll(apps)
                     filteredAppsList.clear()
@@ -214,6 +221,8 @@ class AppSelectionActivity : AppCompatActivity() {
                             "Nenhum aplicativo encontrado",
                             Toast.LENGTH_SHORT
                         ).show()
+                    } else {
+                        Log.d(TAG, "Lista atualizada com sucesso. Total: ${appsList.size} apps")
                     }
                 }
             } catch (e: Exception) {
@@ -253,28 +262,34 @@ class AppSelectionActivity : AppCompatActivity() {
     /**
      * Adapter customizado para exibir apps na lista
      */
-    private inner class AppListAdapter(private var apps: MutableList<AppInfo>) : BaseAdapter() {
+    private inner class AppListAdapter(apps: MutableList<AppInfo>) : BaseAdapter() {
+        private val appsList = mutableListOf<AppInfo>().apply { addAll(apps) }
+        
         fun updateList(newApps: List<AppInfo>) {
-            apps.clear()
-            apps.addAll(newApps)
+            appsList.clear()
+            appsList.addAll(newApps)
             notifyDataSetChanged()
+            Log.d(TAG, "Adapter atualizado com ${appsList.size} apps")
         }
         
-        override fun getCount(): Int = apps.size
+        override fun getCount(): Int = appsList.size
         
-        override fun getItem(position: Int): AppInfo = apps[position]
+        override fun getItem(position: Int): AppInfo = appsList[position]
         
         override fun getItemId(position: Int): Long = position.toLong()
         
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
             val view = convertView ?: layoutInflater.inflate(R.layout.list_item_app, parent, false)
-            val app = apps[position]
             
-            val appNameView = view.findViewById<TextView>(R.id.appName)
-            val appPackageView = view.findViewById<TextView>(R.id.appPackage)
-            
-            appNameView.text = app.name
-            appPackageView.text = app.packageName
+            if (position < appsList.size) {
+                val app = appsList[position]
+                
+                val appNameView = view.findViewById<TextView>(R.id.appName)
+                val appPackageView = view.findViewById<TextView>(R.id.appPackage)
+                
+                appNameView?.text = app.name
+                appPackageView?.text = app.packageName
+            }
             
             return view
         }
