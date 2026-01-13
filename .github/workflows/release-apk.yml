@@ -1,0 +1,103 @@
+name: Build and Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name (ex: v1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+        
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      with:
+        api-level: 34
+        build-tools: 34.0.0
+        components: platform-tools,platforms;android-34,build-tools;34.0.0
+        
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+      
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+      
+    - name: Get version from tag
+      id: tag
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          TAG_NAME="${{ github.event.inputs.tag_name }}"
+        else
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+        fi
+        echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+        echo "Tag: $TAG_NAME"
+      
+    - name: Build Release APK
+      run: ./gradlew assembleRelease --stacktrace --no-daemon
+      env:
+        ANDROID_HOME: ${{ env.ANDROID_HOME }}
+        ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+      
+    - name: Get APK file info
+      id: apk_info
+      run: |
+        APK_PATH="app/build/outputs/apk/release/app-release.apk"
+        APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
+        APK_NAME="MRIT-Control-${{ steps.tag.outputs.tag_name }}.apk"
+        echo "apk_size=$APK_SIZE" >> $GITHUB_OUTPUT
+        echo "apk_name=$APK_NAME" >> $GITHUB_OUTPUT
+        echo "APK Size: $APK_SIZE"
+        echo "APK Name: $APK_NAME"
+      
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.tag.outputs.tag_name }}
+        name: Release ${{ steps.tag.outputs.tag_name }}
+        body: |
+          ## 🚀 Release ${{ steps.tag.outputs.tag_name }}
+          
+          ### 📦 APK
+          - **Tamanho**: ${{ steps.apk_info.outputs.apk_size }}
+          - **Commit**: ${{ github.sha }}
+          - **Build Date**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          
+          ### 📥 Download
+          Baixe o APK abaixo e instale no seu dispositivo Android.
+        files: |
+          app/build/outputs/apk/release/app-release.apk
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Upload APK artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-release-${{ steps.tag.outputs.tag_name }}
+        path: app/build/outputs/apk/release/app-release.apk
+        retention-days: 90
